@@ -14,7 +14,7 @@
 
 FILE *global_events_log_file = NULL;
 timestamp_t lamport_time = 0;  // Глобальное время Лампорта
-timestamp_t get_lamport_time() {
+timestamp_t get_lamport_time(void ) {
     return lamport_time;
 }
 void handle_message(ProcessPtr p, Message *msg);
