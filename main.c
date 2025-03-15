@@ -42,13 +42,11 @@ void handle_message(ProcessPtr p, Message *msg) {
     if (msg->s_header.s_payload_len >= sizeof(local_id)) {
         memcpy(&sender, msg->s_payload, sizeof(local_id));
     } else {
-        fprintf(global_events_log_file, "Process %d: Received invalid message with payload length %d\n", p->id, msg->s_header.s_payload_len);
-        fflush(global_events_log_file);
+        fprintf(stderr, "Process %d: Received invalid message with payload length %d\n", p->id, msg->s_header.s_payload_len);
         return;
     }
-    fprintf(global_events_log_file, "Process %d: Received message type %d from process %d at Lamport time %d\n", 
+    fprintf(stderr, "Process %d: Received message type %d from process %d at Lamport time %d\n", 
             p->id, msg->s_header.s_type, sender, lamport_time);
-    fflush(global_events_log_file);
     switch (msg->s_header.s_type) {
         case CS_REQUEST:
             add_to_queue(p, sender, msg->s_header.s_local_time);
@@ -64,18 +62,16 @@ void handle_message(ProcessPtr p, Message *msg) {
 }
 
 void log_queue(ProcessPtr p) {
-    fprintf(global_events_log_file, "Process %d: Queue state: ", p->id);
+    fprintf(stderr, "Process %d: Queue state: ", p->id);
     for (int i = 0; i < queue_size; i++) {
-        fprintf(global_events_log_file, "(%d, %d) ", queue[i].process_id, queue[i].timestamp);
+        fprintf(stderr, "(%d, %d) ", queue[i].process_id, queue[i].timestamp);
     }
     fprintf(global_events_log_file, "\n");
-    fflush(global_events_log_file);
 }
 
 void add_to_queue(ProcessPtr p, local_id id, timestamp_t time) {
     if (queue_size >= MAX_PROCESS_ID + 1) {
-        fprintf(global_events_log_file, "Process %d: Queue overflow!\n", p->id);
-        fflush(global_events_log_file);
+        fprintf(stderr, "Process %d: Queue overflow!\n", p->id);
         return;
     }
     queue[queue_size].process_id = id;
@@ -122,8 +118,7 @@ void send_cs_request(ProcessPtr p) {
     Message msg = { .s_header = { MESSAGE_MAGIC, sizeof(local_id), CS_REQUEST, lamport_time } };
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
-    fprintf(global_events_log_file, "Process %d: Sent CS_REQUEST to all at Lamport time %d\n", p->id, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Sent CS_REQUEST to all at Lamport time %d\n", p->id, lamport_time);
 }
 
 void send_cs_reply(ProcessPtr p, local_id to) {
@@ -131,8 +126,7 @@ void send_cs_reply(ProcessPtr p, local_id to) {
     Message msg = { .s_header = { MESSAGE_MAGIC, sizeof(local_id), CS_REPLY, lamport_time } };
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send(p, to, &msg);
-    fprintf(global_events_log_file, "Process %d: Sent CS_REPLY to process %d at Lamport time %d\n", p->id, to, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Sent CS_REPLY to process %d at Lamport time %d\n", p->id, to, lamport_time);
 }
 
 void send_cs_release(ProcessPtr p) {
@@ -140,8 +134,7 @@ void send_cs_release(ProcessPtr p) {
     Message msg = { .s_header = { MESSAGE_MAGIC, sizeof(local_id), CS_RELEASE, lamport_time } };
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
-    fprintf(global_events_log_file, "Process %d: Sent CS_RELEASE to all at Lamport time %d\n", p->id, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Sent CS_RELEASE to all at Lamport time %d\n", p->id, lamport_time);
 }
 
 int request_cs(const void * self) {
@@ -149,19 +142,16 @@ int request_cs(const void * self) {
     send_cs_request(p);
     add_to_queue(p, p->id, lamport_time);
     memset(replies_received, 0, sizeof(replies_received));
-    fprintf(global_events_log_file, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
     while (!all_replies_received(p) || !is_highest_priority(p)) {
-        fprintf(global_events_log_file, "Process %d: Waiting for CS - replies received: %d, is highest priority: %d\n", 
+        fprintf(stderr, "Process %d: Waiting for CS - replies received: %d, is highest priority: %d\n", 
                 p->id, all_replies_received(p), is_highest_priority(p));
-        fflush(global_events_log_file);
         Message received_msg;
         if (receive_any(p, &received_msg) == 0) {
             handle_message(p, &received_msg);
         }
     }
-    fprintf(global_events_log_file, "Process %d: Entered CS at Lamport time %d\n", p->id, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Entered CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
 
@@ -169,8 +159,7 @@ int release_cs(const void * self) {
     ProcessPtr p = (ProcessPtr)self;
     remove_from_queue(p->id);
     send_cs_release(p);
-    fprintf(global_events_log_file, "Process %d: Released CS at Lamport time %d\n", p->id, lamport_time);
-    fflush(global_events_log_file);
+    fprintf(stderr, "Process %d: Released CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
 
@@ -224,21 +213,17 @@ int main(int argc, char *argv[]) {
             // Выполнение полезной работы
             int N = my_id * 5;
             fprintf(global_events_log_file, "Mutex flag %d", use_mutex);
-            fflush(global_events_log_file);
             for (int j = 1; j <= N; j++) {
                 if (use_mutex) {
                     fprintf(global_events_log_file, "Process %d: Before request_cs for iteration %d\n", my_id, j);
-                    fflush(global_events_log_file);
                     request_cs(proc);
                 }
                 char message[256];
                 snprintf(message, sizeof(message), log_loop_operation_fmt, my_id, j, N);
                 fprintf(global_events_log_file, log_loop_operation_fmt, my_id, j, N);
-                fflush(global_events_log_file);
                 print(message);
                 if (use_mutex) {
                     fprintf(global_events_log_file, "Process %d: Before release_cs for iteration %d\n", my_id, j);
-                    fflush(global_events_log_file);
                     release_cs(proc);
                 }
                 // Обработка ожидающих сообщений
