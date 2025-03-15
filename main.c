@@ -107,10 +107,16 @@ int is_highest_priority(ProcessPtr p) {
 }
 
 int all_replies_received(ProcessPtr p) {
-    for (local_id i = 0; i < p->total_processes; i++) {
-        if (i != p->id && replies_received[i] == 0) return 0;
+    int reply_counter = 0;
+    for(int i = 0; i < queue_size - 1; i++) {
+        if(replies_received[(int) queue[i].process_id] == 1) {
+            reply_counter++;
+        }
     }
-    return 1;
+    if(reply_counter == queue_size - 1){
+        return 1;
+    }
+    return 0;
 }
 
 void send_cs_request(ProcessPtr p) {

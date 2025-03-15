@@ -1,12 +1,11 @@
 all:
+	export LD_LIBRARY_PATH="$$LD_LIBRARY_PATH:/app"
 	clang-3.5  -std=c99 -Wall -pedantic -Werror *.c -o main -L. -lruntime
 
-wsl:
-	clang -std=c99 -Wall -pedantic -Werror *.c -o main -L. -lruntime
 
-run: all 
-	LD_PRELOAD=./libruntime.so ./main -p 3 10 20 30
+run: all
+	LD_PRELOAD=./libruntime.so ./main -p 3 --mutexl
 
 clean:
 	rm -f main
-	rm -f *.log
+	rm -f *.log:Wall
