@@ -13,4 +13,5 @@ void log_pipe(FILE *pipes_log_file, local_id from, local_id to, int read, int wr
 void log_transfer_out(FILE *events_log_file, TransferOrder *trnsfr);
 void log_transfer_in(FILE *events_log_file, TransferOrder *trnsfr);
 
+
 #endif // LOG_H
