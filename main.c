@@ -130,7 +130,7 @@ int is_highest_priority(ProcessPtr p)
 
 int all_replies_received(ProcessPtr p)
 {
-    for (local_id i = 0; i < p->total_processes - 1; i++)
+    for (local_id i = 1; i < p->total_processes - 1; i++)
     {
         if (i != p->id && replies_received[i] == 0)
             return 0;
@@ -172,8 +172,7 @@ int request_cs(const void *self)
     add_to_queue(p, p->id, lamport_time);
     memset(replies_received, 0, sizeof(replies_received));
     fprintf(stderr, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
-    while (!all_replies_received(p) && !is_highest_priority(p))
-    {
+    do {
         fprintf(stderr, "Process %d: Waiting for CS - all replies received: %d, is highest priority: %d\n",
                 p->id, all_replies_received(p), is_highest_priority(p));
         Message received_msg;
@@ -181,7 +180,8 @@ int request_cs(const void *self)
         {
             handle_message(p, &received_msg);
         }
-    }
+    } 
+    while (all_replies_received(p) == 0 && is_highest_priority(p) == 0);
     fprintf(stderr, "Process %d: Entered CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
