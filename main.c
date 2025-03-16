@@ -76,11 +76,16 @@ void log_queue(ProcessPtr p)
     {
         fprintf(stderr, "(%d, %d) ", queue[i].process_id, queue[i].timestamp);
     }
+    fprintf(stderr, "\n");
     fprintf(global_events_log_file, "\n");
 }
 
 void add_to_queue(ProcessPtr p, local_id id, timestamp_t time)
 {
+    for(int i = 0; i < queue_size ; i++){
+        if(queue[i].process_id == id) return;
+    }
+
     if (queue_size >= MAX_PROCESS_ID + 1)
     {
         fprintf(stderr, "Process %d: Queue overflow!\n", p->id);
