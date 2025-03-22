@@ -111,6 +111,7 @@ int receive(void *self, local_id from, Message *msg) {
     size_t header_size = sizeof(MessageHeader);
     size_t readn = 0;
     while (readn < header_size) {
+        errno = -1;
         int ret = read(fd, (char*)&msg->s_header + readn, header_size - readn);
         if (ret > 0) {
             readn += ret;
