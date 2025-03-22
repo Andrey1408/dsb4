@@ -49,7 +49,6 @@ int send(void *self, local_id dst, const Message *msg) {
     lamport_time++;
     Message updated_msg = *msg;
     updated_msg.s_header.s_local_time = lamport_time;
-
     size_t total_len = sizeof(MessageHeader) + updated_msg.s_header.s_payload_len;
     size_t written = 0;
     while (written < total_len) {
@@ -78,12 +77,14 @@ int send(void *self, local_id dst, const Message *msg) {
  */
 int send_multicast(void *self, const Message *msg) {
     ProcessPtr p = (ProcessPtr)self;
+    timestamp_t lamport_time_temp = lamport_time;
     for (local_id dst = 0; dst < p->total_processes; dst++) {
         if (dst != p->id) {
             if (send(self, dst, msg) != 0) {
                 return -1;
             }
         }
+        lamport_time = lamport_time_temp;
     }
     return 0;
 }

@@ -37,10 +37,12 @@ typedef struct
 Request queue[MAX_PROCESS_ID + 1];
 int queue_size = 0;
 int replies_received[MAX_PROCESS_ID + 1] = {0};
+int started_received[MAX_PROCESS_ID + 1] = {0};
+int done_received[MAX_PROCESS_ID + 1] = {0};
+int release_received[MAX_PROCESS_ID + 1] = {0};
 
 void handle_message(ProcessPtr p, Message *msg)
 {
-    lamport_time = (lamport_time > msg->s_header.s_local_time) ? lamport_time + 1 : msg->s_header.s_local_time + 1;
     local_id sender;
     if (msg->s_header.s_payload_len >= sizeof(local_id))
     {
@@ -51,12 +53,12 @@ void handle_message(ProcessPtr p, Message *msg)
         fprintf(stderr, "Process %d: Received invalid message with payload length %d\n", p->id, msg->s_header.s_payload_len);
         return;
     }
-    fprintf(stderr, "Process %d: Received message type %d from process %d at Lamport time %d\n",
-            p->id, msg->s_header.s_type, sender, lamport_time);
+    fprintf(stderr, "Process %d: Received message type %d from process %d at Lamport time %d with time attached %d\n",
+            p->id, msg->s_header.s_type, sender, lamport_time, msg->s_header.s_local_time);
     switch (msg->s_header.s_type)
     {
     case CS_REQUEST:
-        add_to_queue(p, sender, msg->s_header.s_local_time);
+        add_to_queue(p, sender, msg->s_header.s_local_time - 1);
         send_cs_reply(p, sender);
         break;
     case CS_REPLY:
@@ -65,6 +67,8 @@ void handle_message(ProcessPtr p, Message *msg)
         break;
     case CS_RELEASE:
         remove_from_queue(sender);
+        replies_received[sender] = 1;
+        release_received[sender] = 1;
         break;
     }
 }
@@ -80,10 +84,30 @@ void log_queue(ProcessPtr p)
     fprintf(global_events_log_file, "\n");
 }
 
+void sort_queue(ProcessPtr p)
+{
+    for (int pass = 0; pass < queue_size; pass++)
+    {
+        for (int i = queue_size - 1; i > 0; i--)
+        {
+            if (queue[i].timestamp < queue[i - 1].timestamp ||
+                (queue[i].timestamp == queue[i - 1].timestamp && queue[i].process_id < queue[i - 1].process_id))
+            {
+                Request temp = queue[i];
+                queue[i] = queue[i - 1];
+                queue[i - 1] = temp;
+            }
+        }
+    }
+    log_queue(p);
+}
+
 void add_to_queue(ProcessPtr p, local_id id, timestamp_t time)
 {
-    for(int i = 0; i < queue_size ; i++){
-        if(queue[i].process_id == id) return;
+    for (int i = 0; i < queue_size; i++)
+    {
+        if (queue[i].process_id == id)
+            return;
     }
 
     if (queue_size >= MAX_PROCESS_ID + 1)
@@ -95,21 +119,7 @@ void add_to_queue(ProcessPtr p, local_id id, timestamp_t time)
     queue[queue_size].timestamp = time;
     queue_size++;
     // Сортировка очереди
-    for (int i = queue_size - 1; i > 0; i--)
-    {
-        if (queue[i].timestamp < queue[i - 1].timestamp ||
-            (queue[i].timestamp == queue[i - 1].timestamp && queue[i].process_id < queue[i - 1].process_id))
-        {
-            Request temp = queue[i];
-            queue[i] = queue[i - 1];
-            queue[i - 1] = temp;
-        }
-        else
-        {
-            break;
-        }
-    }
-    log_queue(p);
+    sort_queue(p);
 }
 
 void remove_from_queue(local_id id)
@@ -133,9 +143,23 @@ int is_highest_priority(ProcessPtr p)
     return 1;
 }
 
-int all_replies_received(ProcessPtr p)
+int all_release_received(ProcessPtr p)
 {
     for (local_id i = 1; i < p->total_processes - 1; i++)
+    {
+        if (i != p->id && release_received[i] == 0)
+        {
+            fprintf(stderr, "Process %d: in release received: %d\n", p->id, 0);
+            return 0;
+        }
+    }
+    fprintf(stderr, "Process %d: in release received: %d\n", p->id, 1);
+    return 1;
+}
+
+int all_replies_received(ProcessPtr p)
+{
+    for (local_id i = 0; i < p->total_processes - 1; i++)
     {
         if (i != p->id && replies_received[i] == 0)
             return 0;
@@ -145,7 +169,6 @@ int all_replies_received(ProcessPtr p)
 
 void send_cs_request(ProcessPtr p)
 {
-    lamport_time++;
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_REQUEST, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
@@ -154,7 +177,6 @@ void send_cs_request(ProcessPtr p)
 
 void send_cs_reply(ProcessPtr p, local_id to)
 {
-    lamport_time++;
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_REPLY, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send(p, to, &msg);
@@ -163,7 +185,6 @@ void send_cs_reply(ProcessPtr p, local_id to)
 
 void send_cs_release(ProcessPtr p)
 {
-    lamport_time++;
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_RELEASE, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
@@ -177,7 +198,8 @@ int request_cs(const void *self)
     add_to_queue(p, p->id, lamport_time);
     memset(replies_received, 0, sizeof(replies_received));
     fprintf(stderr, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
-    do {
+    do
+    {
         fprintf(stderr, "Process %d: Waiting for CS - all replies received: %d, is highest priority: %d\n",
                 p->id, all_replies_received(p), is_highest_priority(p));
         Message received_msg;
@@ -185,8 +207,8 @@ int request_cs(const void *self)
         {
             handle_message(p, &received_msg);
         }
-    } 
-    while (all_replies_received(p) == 0 && is_highest_priority(p) == 0);
+        sort_queue(p);
+    } while (all_replies_received(p) == 0 && is_highest_priority(p) == 0);
     fprintf(stderr, "Process %d: Entered CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
@@ -194,7 +216,6 @@ int request_cs(const void *self)
 int release_cs(const void *self)
 {
     ProcessPtr p = (ProcessPtr)self;
-    remove_from_queue(p->id);
     send_cs_release(p);
     fprintf(stderr, "Process %d: Released CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
@@ -238,7 +259,6 @@ int main(int argc, char *argv[])
             ProcessPtr proc = createProcess(my_id, process_count, pipeline);
 
             // Отправка сообщения STARTED
-            lamport_time++;
             Message msg = {.s_header = {MESSAGE_MAGIC, 0, STARTED, lamport_time}};
             log_started(global_events_log_file, my_id, 0);
             send_multicast(proc, &msg);
@@ -253,7 +273,6 @@ int main(int argc, char *argv[])
                 {
                     fprintf(stderr, "Child %d: error receiving STARTED from %d\n", my_id, src);
                 }
-                lamport_time = (lamport_time > rmsg.s_header.s_local_time) ? lamport_time + 1 : rmsg.s_header.s_local_time + 1;
             }
             log_received_all_started(global_events_log_file, my_id);
 
@@ -276,9 +295,18 @@ int main(int argc, char *argv[])
                 release_cs(proc);
             }
             // Обработка ожидающих сообщений
-
+            while (all_release_received(proc) == 0)
+            {
+                for (local_id src = 1; src < process_count; src++)
+                {
+                    Message rmsg;
+                    if (receive(proc, src, &rmsg) == 0)
+                    {
+                        handle_message(proc, &rmsg);
+                    }
+                }
+            }
             // Отправка сообщения DONE
-            lamport_time++;
             msg.s_header.s_type = DONE;
             msg.s_header.s_local_time = lamport_time;
             msg.s_header.s_payload_len = 0;
@@ -295,7 +323,6 @@ int main(int argc, char *argv[])
                 {
                     fprintf(stderr, "Child %d: error receiving DONE from %d\n", my_id, src);
                 }
-                lamport_time = (lamport_time > rmsg.s_header.s_local_time) ? lamport_time + 1 : rmsg.s_header.s_local_time + 1;
             }
             log_received_all_done(global_events_log_file, my_id);
 
@@ -320,7 +347,6 @@ int main(int argc, char *argv[])
         {
             fprintf(stderr, "Parent: error receiving STARTED from %d\n", src);
         }
-        lamport_time = (lamport_time > rmsg.s_header.s_local_time) ? lamport_time + 1 : rmsg.s_header.s_local_time + 1;
     }
     fprintf(global_events_log_file, "Parent: received all STARTED messages\n");
 
@@ -331,7 +357,6 @@ int main(int argc, char *argv[])
         {
             fprintf(stderr, "Parent: error receiving DONE from %d\n", src);
         }
-        lamport_time = (lamport_time > rmsg.s_header.s_local_time) ? lamport_time + 1 : rmsg.s_header.s_local_time + 1;
     }
     fprintf(global_events_log_file, "Parent: received all DONE messages\n");
 
