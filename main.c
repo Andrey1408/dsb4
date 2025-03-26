@@ -27,6 +27,9 @@ void send_cs_request(ProcessPtr p);
 void send_cs_reply(ProcessPtr p, local_id to);
 void send_cs_release(ProcessPtr p);
 void log_queue(ProcessPtr p);
+void request_handler(ProcessPtr p, Message *msg, local_id *sender);
+int started_handler(ProcessPtr p, local_id *sender);
+int done_handler(ProcessPtr p, local_id *sender);
 
 typedef struct
 {
@@ -35,11 +38,14 @@ typedef struct
 } Request;
 
 Request queue[MAX_PROCESS_ID + 1];
+timestamp_t queue_enter_time = -1;
 int queue_size = 0;
 int replies_received[MAX_PROCESS_ID + 1] = {0};
+int release_received[MAX_PROCESS_ID + 1] = {0};
 int started_received[MAX_PROCESS_ID + 1] = {0};
 int done_received[MAX_PROCESS_ID + 1] = {0};
-int release_received[MAX_PROCESS_ID + 1] = {0};
+int all_started_received = 0;
+int all_done_received = 0;
 
 void handle_message(ProcessPtr p, Message *msg)
 {
@@ -57,19 +63,65 @@ void handle_message(ProcessPtr p, Message *msg)
             p->id, msg->s_header.s_type, sender, lamport_time, msg->s_header.s_local_time);
     switch (msg->s_header.s_type)
     {
+    case STARTED:
+        if (started_handler(p, &sender))
+        {
+            all_started_received = 1;
+        }
+        break;
+    case DONE:
+        if (done_handler(p, &sender))
+        {
+            all_done_received = 1;
+        }
+        break;
     case CS_REQUEST:
-        add_to_queue(p, sender, msg->s_header.s_local_time - 1);
-        send_cs_reply(p, sender);
+        request_handler(p, msg, &sender);
         break;
     case CS_REPLY:
         replies_received[sender] = 1;
-        add_to_queue(p, sender, msg->s_header.s_local_time);
         break;
     case CS_RELEASE:
         remove_from_queue(sender);
         replies_received[sender] = 1;
         release_received[sender] = 1;
         break;
+    default:
+        fprintf(stderr, "Process %d: Unhandled message read\n", p->id);
+    }
+}
+
+int started_handler(ProcessPtr p, local_id *sender)
+{
+    started_received[*sender] = 1;
+    for (local_id i = 1; i < p->total_processes; i++)
+    {
+        if (i != p->id && started_received[i] == 0)
+            return 0;
+    }
+    return 1;
+}
+
+int done_handler(ProcessPtr p, local_id *sender)
+{
+    done_received[*sender] = 1;
+    for (local_id i = 1; i < p->total_processes; i++)
+    {
+        if (i != p->id && done_received[i] == 0)
+            return 0;
+    }
+    return 1;
+}
+
+void request_handler(ProcessPtr p, Message *msg, local_id *sender)
+{
+    if (msg->s_header.s_local_time >= queue_enter_time)
+    {
+        add_to_queue(p, *sender, msg->s_header.s_local_time - 1);
+    }
+    else
+    {
+        send_cs_reply(p, *sender);
     }
 }
 
@@ -145,7 +197,7 @@ int is_highest_priority(ProcessPtr p)
 
 int all_release_received(ProcessPtr p)
 {
-    for (local_id i = 1; i < p->total_processes - 1; i++)
+    for (local_id i = 1; i < p->total_processes; i++)
     {
         if (i != p->id && release_received[i] == 0)
         {
@@ -159,7 +211,7 @@ int all_release_received(ProcessPtr p)
 
 int all_replies_received(ProcessPtr p)
 {
-    for (local_id i = 0; i < p->total_processes - 1; i++)
+    for (local_id i = 1; i < p->total_processes; i++)
     {
         if (i != p->id && replies_received[i] == 0)
             return 0;
@@ -196,6 +248,7 @@ int request_cs(const void *self)
     ProcessPtr p = (ProcessPtr)self;
     send_cs_request(p);
     add_to_queue(p, p->id, lamport_time);
+    queue_enter_time = lamport_time;
     memset(replies_received, 0, sizeof(replies_received));
     fprintf(stderr, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
     do
@@ -259,22 +312,34 @@ int main(int argc, char *argv[])
             ProcessPtr proc = createProcess(my_id, process_count, pipeline);
 
             // Отправка сообщения STARTED
-            Message msg = {.s_header = {MESSAGE_MAGIC, 0, STARTED, lamport_time}};
+            Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), STARTED, lamport_time}};
+            memcpy(msg.s_payload, &proc->id, sizeof(local_id));
             log_started(global_events_log_file, my_id, 0);
             send_multicast(proc, &msg);
 
             // Получение всех STARTED
-            for (local_id src = 1; src < process_count; src++)
+            while (!all_started_received)
             {
-                if (src == my_id)
-                    continue;
-                Message rmsg;
-                if (receive(proc, src, &rmsg) != 0)
+                Message received_msg;
+                if (receive_any(proc, &received_msg) == 0)
                 {
-                    fprintf(stderr, "Child %d: error receiving STARTED from %d\n", my_id, src);
+                    handle_message(proc, &received_msg);
                 }
             }
             log_received_all_started(global_events_log_file, my_id);
+            /*
+                        for (local_id src = 1; src < process_count; src++)
+                        {
+                            if (src == my_id)
+                                continue;
+                            Message rmsg;
+                            if (receive(proc, src, &rmsg) != 0)
+                            {
+                                fprintf(stderr, "Child %d: error receiving STARTED from %d\n", my_id, src);
+                            }
+                        }
+                        log_received_all_started(global_events_log_file, my_id);
+            */
 
             // Выполнение полезной работы
             int N = my_id * 5;
@@ -295,25 +360,33 @@ int main(int argc, char *argv[])
                 release_cs(proc);
             }
             // Обработка ожидающих сообщений
-            while (all_release_received(proc) == 0)
+            while (!all_release_received(proc))
             {
-                for (local_id src = 1; src < process_count; src++)
+                Message received_msg;
+                if (receive_any(proc, &received_msg) == 0)
                 {
-                    Message rmsg;
-                    if (receive(proc, src, &rmsg) == 0)
-                    {
-                        handle_message(proc, &rmsg);
-                    }
+                    handle_message(proc, &received_msg);
                 }
             }
             // Отправка сообщения DONE
+            msg.s_header.s_magic = MESSAGE_MAGIC;
+            msg.s_header.s_payload_len = proc->id;
             msg.s_header.s_type = DONE;
             msg.s_header.s_local_time = lamport_time;
-            msg.s_header.s_payload_len = 0;
             log_done(global_events_log_file, my_id, 0);
             send_multicast(proc, &msg);
 
             // Получение всех DONE
+            while (!all_done_received)
+            {
+                Message received_msg;
+                if (receive_any(proc, &received_msg) == 0)
+                {
+                    handle_message(proc, &received_msg);
+                }
+            }
+            log_received_all_done(global_events_log_file, my_id);
+            /*
             for (local_id src = 1; src < process_count; src++)
             {
                 if (src == my_id)
@@ -325,7 +398,7 @@ int main(int argc, char *argv[])
                 }
             }
             log_received_all_done(global_events_log_file, my_id);
-
+*/
             free(proc);
             exit(0);
         }
@@ -339,25 +412,24 @@ int main(int argc, char *argv[])
     local_id my_id = 0;
     close_unused_pipes(pipeline, my_id);
     ProcessPtr proc = createProcess(my_id, process_count, pipeline);
-
-    for (local_id src = 1; src < process_count; src++)
+    while (!all_started_received)
     {
-        Message rmsg;
-        if (receive(proc, src, &rmsg) != 0)
+        Message received_msg;
+        if (receive_any(proc, &received_msg) == 0)
         {
-            fprintf(stderr, "Parent: error receiving STARTED from %d\n", src);
+            handle_message(proc, &received_msg);
         }
     }
     fprintf(global_events_log_file, "Parent: received all STARTED messages\n");
 
-    for (local_id src = 1; src < process_count; src++)
-    {
-        Message rmsg;
-        if (receive(proc, src, &rmsg) != 0)
-        {
-            fprintf(stderr, "Parent: error receiving DONE from %d\n", src);
-        }
-    }
+            while (!all_done_received)
+            {
+                Message received_msg;
+                if (receive_any(proc, &received_msg) == 0)
+                {
+                    handle_message(proc, &received_msg);
+                }
+            }
     fprintf(global_events_log_file, "Parent: received all DONE messages\n");
 
     for (int i = 1; i < process_count; i++)
