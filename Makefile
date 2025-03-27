@@ -4,8 +4,11 @@ all:
 wsl: 
 	clang-14 -std=c99 -Wall -g -O0 -pedantic -Werror *.c -o main -L. -lruntime
 
-run: 
-	LD_PRELOAD=./libruntime.so ./main -p 5 --mutexl
+run-mutexl: 
+	LD_PRELOAD=./libruntime.so ./main -p 9 --mutexl
+
+run:
+	LD_PRELOAD=./libruntime.so ./main -p 9 
 
 clean:
 	rm -f main

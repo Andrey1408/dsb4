@@ -327,19 +327,6 @@ int main(int argc, char *argv[])
                 }
             }
             log_received_all_started(global_events_log_file, my_id);
-            /*
-                        for (local_id src = 1; src < process_count; src++)
-                        {
-                            if (src == my_id)
-                                continue;
-                            Message rmsg;
-                            if (receive(proc, src, &rmsg) != 0)
-                            {
-                                fprintf(stderr, "Child %d: error receiving STARTED from %d\n", my_id, src);
-                            }
-                        }
-                        log_received_all_started(global_events_log_file, my_id);
-            */
 
             // Выполнение полезной работы
             int N = my_id * 5;
@@ -360,7 +347,7 @@ int main(int argc, char *argv[])
                 release_cs(proc);
             }
             // Обработка ожидающих сообщений
-            while (!all_release_received(proc))
+            while (!all_release_received(proc) && use_mutex)
             {
                 Message received_msg;
                 if (receive_any(proc, &received_msg) == 0)
@@ -386,19 +373,6 @@ int main(int argc, char *argv[])
                 }
             }
             log_received_all_done(global_events_log_file, my_id);
-            /*
-            for (local_id src = 1; src < process_count; src++)
-            {
-                if (src == my_id)
-                    continue;
-                Message rmsg;
-                if (receive(proc, src, &rmsg) != 0)
-                {
-                    fprintf(stderr, "Child %d: error receiving DONE from %d\n", my_id, src);
-                }
-            }
-            log_received_all_done(global_events_log_file, my_id);
-*/
             free(proc);
             exit(0);
         }
@@ -422,14 +396,14 @@ int main(int argc, char *argv[])
     }
     fprintf(global_events_log_file, "Parent: received all STARTED messages\n");
 
-            while (!all_done_received)
-            {
-                Message received_msg;
-                if (receive_any(proc, &received_msg) == 0)
-                {
-                    handle_message(proc, &received_msg);
-                }
-            }
+    while (!all_done_received)
+    {
+        Message received_msg;
+        if (receive_any(proc, &received_msg) == 0)
+        {
+            handle_message(proc, &received_msg);
+        }
+    }
     fprintf(global_events_log_file, "Parent: received all DONE messages\n");
 
     for (int i = 1; i < process_count; i++)
