@@ -56,11 +56,8 @@ void handle_message(ProcessPtr p, Message *msg)
     }
     else
     {
-        fprintf(stderr, "Process %d: Received invalid message with payload length %d\n", p->id, msg->s_header.s_payload_len);
         return;
     }
-    fprintf(stderr, "Process %d: Received message type %d from process %d at Lamport time %d with time attached %d\n",
-            p->id, msg->s_header.s_type, sender, lamport_time, msg->s_header.s_local_time);
     switch (msg->s_header.s_type)
     {
     case STARTED:
@@ -127,12 +124,6 @@ void request_handler(ProcessPtr p, Message *msg, local_id *sender)
 
 void log_queue(ProcessPtr p)
 {
-    fprintf(stderr, "Process %d: Queue state: ", p->id);
-    for (int i = 0; i < queue_size; i++)
-    {
-        fprintf(stderr, "(%d, %d) ", queue[i].process_id, queue[i].timestamp);
-    }
-    fprintf(stderr, "\n");
     fprintf(global_events_log_file, "\n");
 }
 
@@ -201,11 +192,9 @@ int all_release_received(ProcessPtr p)
     {
         if (i != p->id && release_received[i] == 0)
         {
-            fprintf(stderr, "Process %d: in release received: %d\n", p->id, 0);
             return 0;
         }
     }
-    fprintf(stderr, "Process %d: in release received: %d\n", p->id, 1);
     return 1;
 }
 
@@ -224,7 +213,6 @@ void send_cs_request(ProcessPtr p)
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_REQUEST, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
-    fprintf(stderr, "Process %d: Sent CS_REQUEST to all at Lamport time %d\n", p->id, lamport_time);
 }
 
 void send_cs_reply(ProcessPtr p, local_id to)
@@ -232,7 +220,6 @@ void send_cs_reply(ProcessPtr p, local_id to)
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_REPLY, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send(p, to, &msg);
-    fprintf(stderr, "Process %d: Sent CS_REPLY to process %d at Lamport time %d\n", p->id, to, lamport_time);
 }
 
 void send_cs_release(ProcessPtr p)
@@ -240,7 +227,6 @@ void send_cs_release(ProcessPtr p)
     Message msg = {.s_header = {MESSAGE_MAGIC, sizeof(local_id), CS_RELEASE, lamport_time}};
     memcpy(msg.s_payload, &p->id, sizeof(local_id));
     send_multicast(p, &msg);
-    fprintf(stderr, "Process %d: Sent CS_RELEASE to all at Lamport time %d\n", p->id, lamport_time);
 }
 
 int request_cs(const void *self)
@@ -250,11 +236,8 @@ int request_cs(const void *self)
     add_to_queue(p, p->id, lamport_time);
     queue_enter_time = lamport_time;
     memset(replies_received, 0, sizeof(replies_received));
-    fprintf(stderr, "Process %d: Requesting CS at Lamport time %d\n", p->id, lamport_time);
     do
     {
-        fprintf(stderr, "Process %d: Waiting for CS - all replies received: %d, is highest priority: %d\n",
-                p->id, all_replies_received(p), is_highest_priority(p));
         Message received_msg;
         if (receive_any(p, &received_msg) == 0)
         {
@@ -262,7 +245,6 @@ int request_cs(const void *self)
         }
         sort_queue(p);
     } while (all_replies_received(p) == 0 && is_highest_priority(p) == 0);
-    fprintf(stderr, "Process %d: Entered CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
 
@@ -270,7 +252,6 @@ int release_cs(const void *self)
 {
     ProcessPtr p = (ProcessPtr)self;
     send_cs_release(p);
-    fprintf(stderr, "Process %d: Released CS at Lamport time %d\n", p->id, lamport_time);
     return 0;
 }
 
